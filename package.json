@@ -17,8 +17,23 @@
         "command": "locore.openCodeReview",
         "title": "Open CodeReview",
         "category": "LoCoRe"
+      },
+      {
+        "command": "locore.createReview",
+        "title": "Create Review",
+        "category": "LoCoRe",
+        "enablement": "!commentIsEmpty"
       }
-    ]
+    ],
+    "menus": {
+      "comments/commentThread/context": [
+        {
+          "command": "locore.createReview",
+          "group": "inline",
+          "when": "commentController == locore-comments && commentThreadIsEmpty"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

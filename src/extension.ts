@@ -19,6 +19,11 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     context.subscriptions.push(disposable);
+
+    context.subscriptions.push(vscode.commands.registerCommand('locore.createReview', (reply: vscode.CommentReply) => {
+        createReview(reply);
+    }));
+
 }
 
 /**
@@ -61,7 +66,7 @@ function initializeCommentController(context: vscode.ExtensionContext) {
         'locore-comments',
         'LoCoRe Code Review'
     );
-    
+
     // コメント範囲の提供設定
     commentController.commentingRangeProvider = {
         /**
@@ -80,9 +85,12 @@ function initializeCommentController(context: vscode.ExtensionContext) {
     context.subscriptions.push(commentController);
     console.log('CommentAPI initialized');
 }
+function createReview(reply: vscode.CommentReply) {
 
+
+}
 /**
  * 拡張機能の非アクティベーション関数
  * VS Codeが拡張機能を無効化する際に呼び出される
  */
-export function deactivate() {}
+export function deactivate() { }
