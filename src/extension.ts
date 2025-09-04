@@ -14,11 +14,9 @@ export function activate(context: vscode.ExtensionContext) {
     initializeExtension(context);
 
     // Open CodeReviewコマンドの登録
-    const disposable = vscode.commands.registerCommand('locore.openCodeReview', () => {
+    context.subscriptions.push(vscode.commands.registerCommand('locore.openCodeReview', () => {
         vscode.window.showInformationMessage('LoCoRe: Open CodeReview command executed!');
-    });
-
-    context.subscriptions.push(disposable);
+    }));
 
     context.subscriptions.push(vscode.commands.registerCommand('locore.createReview', (reply: vscode.CommentReply) => {
         createReview(reply);
@@ -86,7 +84,6 @@ function initializeCommentController(context: vscode.ExtensionContext) {
     console.log('CommentAPI initialized');
 }
 function createReview(reply: vscode.CommentReply) {
-
 
 }
 /**
