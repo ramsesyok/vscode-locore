@@ -23,6 +23,12 @@
         "title": "Create Review",
         "category": "LoCoRe",
         "enablement": "!commentIsEmpty"
+      },
+      {
+        "command": "locore.replyReview",
+        "title": "Reply",
+        "category": "LoCoRe",
+        "enablement": "!commentIsEmpty"
       }
     ],
     "menus": {
@@ -31,6 +37,11 @@
           "command": "locore.createReview",
           "group": "inline",
           "when": "commentController == locore-comments && commentThreadIsEmpty"
+        },
+        {
+          "command": "locore.replyReview",
+          "group": "inline",
+          "when": "commentController == locore-comments && !commentThreadIsEmpty"
         }
       ]
     }
