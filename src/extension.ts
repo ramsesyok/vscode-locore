@@ -21,12 +21,12 @@ export function activate(context: vscode.ExtensionContext) {
     }));
 
     context.subscriptions.push(vscode.commands.registerCommand('locore.createReview', (reply: vscode.CommentReply) => {
-        createReview(reply);
+        upsertReview(reply);
     }));
 
     // 既存スレッドへの返信（返信ボックスから送信されたテキストを使用）
     context.subscriptions.push(vscode.commands.registerCommand('locore.replyReview', (reply: vscode.CommentReply) => {
-        replyReview(reply);
+        upsertReview(reply);
     }));
 
 }
@@ -221,13 +221,14 @@ async function appendJsonl(reviewPath: string, row: Record<string, any>): Promis
 }
 
 /**
- * コメントスレッドを作成し、最初のレビューコメントを保存する。
- * - JSONL(review.jsonl) にコメント本文を1行追記
- * - index.json にスレッドの索引・状態を登録/更新
- * - VS Code の UI 上のスレッドにもコメントを追加
+ * スレッドの新規作成（最初のコメント）と既存スレッドへの返信を統合した保存処理。
+ * - 必要に応じて新しい threadId を採番し index.json を作成
+ * - JSONL(review.jsonl) にコメント1件を append
+ * - index.json の統計値と lastSeq を更新
+ * - UI のスレッドにコメントを追加
  * @param reply コメント返信コンテキスト（Comment API の引数）
  */
-async function createReview(reply: vscode.CommentReply): Promise<void> {
+async function upsertReview(reply: vscode.CommentReply): Promise<void> {
     try {
         if (!vscode.workspace.workspaceFolders || vscode.workspace.workspaceFolders.length === 0) {
             vscode.window.showErrorMessage('ワークスペースが開かれていません。');
@@ -242,22 +243,19 @@ async function createReview(reply: vscode.CommentReply): Promise<void> {
         // ストアの存在保証（index.json / review.jsonl を用意）
         await initializeReviewStores(codeReviewDir);
 
-        // 返信対象スレッドと、対象ドキュメント位置の取得
         const thread = reply.thread;
         const uriStr = thread.uri.toString();
         const range = thread.range ?? new vscode.Range(0, 0, 0, 0);
         const nowIso = new Date().toISOString();
 
-        // threadId を決定（新規スレッド想定：メニュー when で空スレッド時のみ表示）
-        let threadId = threadIdMap.get(thread);
+        // index を読み込み、threadId を解決 or 採番
+        const indexData = await readIndexJson(indexPath);
+
+        let threadId = threadIdMap.get(thread) || resolveThreadIdFromIndex(indexData, thread);
+        const isNewThread = !threadId; // 空スレッド or 未解決
         if (!threadId) {
             threadId = generateUuid();
             threadIdMap.set(thread, threadId);
-        }
-
-        // index.json 読み込み・更新
-        const indexData = await readIndexJson(indexPath);
-        if (!indexData.threads[threadId]) {
             // 新規スレッドエントリを作成
             indexData.threads[threadId] = {
                 threadId,
@@ -315,12 +313,10 @@ async function createReview(reply: vscode.CommentReply): Promise<void> {
         } as vscode.Comment;
         thread.comments = [...thread.comments, newComment];
 
-        // 返信ボックスを空にする（API は返信後に閉じる想定）
-        // 通知
-        vscode.window.showInformationMessage('レビューを作成しました。');
+        vscode.window.showInformationMessage(isNewThread ? 'レビューを作成しました。' : '返信を追加しました。');
     } catch (err: any) {
-        console.error('[LoCoRe] createReview 失敗:', err);
-        vscode.window.showErrorMessage(`レビュー作成に失敗しました: ${err?.message ?? err}`);
+        console.error('[LoCoRe] upsertReview 失敗:', err);
+        vscode.window.showErrorMessage(`レビュー保存に失敗しました: ${err?.message ?? err}`);
     }
 }
 
