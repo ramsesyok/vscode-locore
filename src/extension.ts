@@ -29,6 +29,14 @@ export function activate(context: vscode.ExtensionContext) {
         upsertReview(reply);
     }));
 
+    // スレッドの解決/再オープン
+    context.subscriptions.push(vscode.commands.registerCommand('locore.resolveThread', async (thread: vscode.CommentThread) => {
+        await setThreadState(thread, 'closed');
+    }));
+    context.subscriptions.push(vscode.commands.registerCommand('locore.reopenThread', async (thread: vscode.CommentThread) => {
+        await setThreadState(thread, 'open');
+    }));
+
 }
 
 /**
@@ -63,6 +71,13 @@ async function initializeExtension(context: vscode.ExtensionContext) {
 
     // データストア（index.json / JSONL）の初期化
     await initializeReviewStores(codeReviewDir);
+
+    // 既存コメントの復元
+    try {
+        await restoreExistingThreads(codeReviewDir);
+    } catch (e) {
+        console.warn(`[LoCoRe] 既存コメント復元に失敗: ${e}`);
+    }
 }
 
 /**
@@ -70,9 +85,11 @@ async function initializeExtension(context: vscode.ExtensionContext) {
  * VS Code の Comment API を用いて、任意の行にコメントスレッドを作成できるようにする。
  * @param context 拡張機能のコンテキスト
  */
+let commentController: vscode.CommentController | undefined;
+
 function initializeCommentController(context: vscode.ExtensionContext) {
     // コメントコントローラーの作成
-    const commentController = vscode.comments.createCommentController(
+    commentController = vscode.comments.createCommentController(
         'locore-comments',
         'LoCoRe Code Review'
     );
@@ -218,6 +235,157 @@ async function appendJsonl(reviewPath: string, row: Record<string, any>): Promis
     const line = JSON.stringify(row);
     await fs.promises.mkdir(path.dirname(reviewPath), { recursive: true });
     await fs.promises.appendFile(reviewPath, line + '\n', 'utf8');
+}
+
+interface ReviewLogRow {
+    threadId: string;
+    commentId: string;
+    seq: number;
+    createdAt: string;
+    author: string;
+    body: string;
+}
+
+/**
+ * review.jsonl を全件読み込み、配列で返す（壊れた行はスキップ）。
+ */
+async function readAllJsonl(reviewPath: string): Promise<ReviewLogRow[]> {
+    try {
+        const buf = await fs.promises.readFile(reviewPath, 'utf8');
+        const rows: ReviewLogRow[] = [];
+        for (const raw of buf.split(/\r?\n/)) {
+            const line = raw.trim();
+            if (!line) continue;
+            try {
+                const obj = JSON.parse(line);
+                if (obj && typeof obj.threadId === 'string') {
+                    rows.push(obj as ReviewLogRow);
+                }
+            } catch {
+                // 壊れた行は読み飛ばす
+            }
+        }
+        return rows;
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * index.json / review.jsonl をもとに既存スレッドとコメントを復元し、
+ * CommentController に反映する。
+ */
+async function restoreExistingThreads(codeReviewDir: string): Promise<void> {
+    if (!commentController) return;
+    const indexPath = path.join(codeReviewDir, 'index.json');
+    const reviewPath = path.join(codeReviewDir, 'review.jsonl');
+
+    // データ読み込み
+    const indexData = await readIndexJson(indexPath);
+    const jsonlRows = await readAllJsonl(reviewPath);
+
+    // threadId ごとにコメントをグルーピングして昇順に整列
+    const byThread = new Map<string, ReviewLogRow[]>();
+    for (const r of jsonlRows) {
+        if (!byThread.has(r.threadId)) byThread.set(r.threadId, []);
+        byThread.get(r.threadId)!.push(r);
+    }
+    for (const [, list] of byThread) {
+        list.sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
+    }
+
+    // 既存スレッドを UI に再構築
+    for (const threadId of Object.keys(indexData.threads)) {
+        const t = indexData.threads[threadId];
+        try {
+            const uri = vscode.Uri.parse(t.uri);
+            const range = new vscode.Range(
+                new vscode.Position(t.range.start.line, t.range.start.character),
+                new vscode.Position(t.range.end.line, t.range.end.character)
+            );
+
+            const thread = commentController.createCommentThread(uri, range, []);
+            threadIdMap.set(thread, threadId);
+            // 再読み込み時は折りたたみ（閉じた状態）で表示
+            thread.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed;
+            const isClosed = t.state === 'closed';
+            thread.state = isClosed ? vscode.CommentThreadState.Resolved : vscode.CommentThreadState.Unresolved;
+            thread.contextValue = isClosed ? 'locore:resolved' : 'locore:unresolved';
+
+            const rows = byThread.get(threadId) ?? [];
+            const comments: vscode.Comment[] = rows.map((r) => ({
+                author: { name: r.author },
+                body: new vscode.MarkdownString(r.body),
+                mode: vscode.CommentMode.Preview,
+                contextValue: 'locore',
+                timestamp: new Date(r.createdAt)
+            } as vscode.Comment));
+            thread.comments = comments;
+        } catch (e) {
+            console.warn(`[LoCoRe] スレッド復元に失敗 threadId=${threadId}: ${e}`);
+        }
+    }
+
+    console.log('[LoCoRe] 既存コメントを復元しました');
+}
+
+/**
+ * 指定スレッドの state を index.json に反映し、UI も同期する。
+ */
+async function setThreadState(thread: vscode.CommentThread, state: 'open' | 'closed'): Promise<void> {
+    try {
+        if (!vscode.workspace.workspaceFolders || vscode.workspace.workspaceFolders.length === 0) {
+            vscode.window.showErrorMessage('ワークスペースが開かれていません。');
+            return;
+        }
+        const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
+        const codeReviewDir = path.join(workspaceRoot, '.codereview');
+        const indexPath = path.join(codeReviewDir, 'index.json');
+
+        // 既存 index を取得
+        const indexData = await readIndexJson(indexPath);
+
+        // threadId を解決（見つからなければ新規で作る）
+        let threadId = threadIdMap.get(thread) || resolveThreadIdFromIndex(indexData, thread);
+        const nowIso = new Date().toISOString();
+        const uriStr = thread.uri.toString();
+        const r = thread.range ?? new vscode.Range(0, 0, 0, 0);
+        if (!threadId) {
+            threadId = generateUuid();
+            threadIdMap.set(thread, threadId);
+            indexData.threads[threadId] = {
+                threadId,
+                uri: uriStr,
+                range: {
+                    start: { line: r.start.line, character: r.start.character },
+                    end: { line: r.end.line, character: r.end.character }
+                },
+                state: 'open',
+                createdAt: nowIso,
+                updatedAt: nowIso,
+                commentCount: 0,
+                anchors: {}
+            };
+            if (!indexData.byUri[uriStr]) indexData.byUri[uriStr] = [];
+            if (!indexData.byUri[uriStr].includes(threadId)) indexData.byUri[uriStr].push(threadId);
+        }
+
+        // state 更新
+        const t = indexData.threads[threadId];
+        t.state = state;
+        t.updatedAt = nowIso;
+        await writeIndexJson(indexPath, indexData);
+
+        // UI 同期
+        const isClosed = state === 'closed';
+        thread.state = isClosed ? vscode.CommentThreadState.Resolved : vscode.CommentThreadState.Unresolved;
+        thread.contextValue = isClosed ? 'locore:resolved' : 'locore:unresolved';
+
+        vscode.window.showInformationMessage(isClosed ? 'スレッドを解決しました。' : 'スレッドを再オープンしました。');
+    } catch (err: any) {
+        console.error('[LoCoRe] setThreadState 失敗:', err);
+        vscode.window.showErrorMessage(`スレッド状態の更新に失敗しました: ${err?.message ?? err}`);
+    }
 }
 
 /**

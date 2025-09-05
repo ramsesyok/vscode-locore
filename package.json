@@ -11,41 +11,61 @@
   ],
   "activationEvents": [],
   "main": "./out/extension.js",
-  "contributes": {
-    "commands": [
-      {
-        "command": "locore.openCodeReview",
-        "title": "Open CodeReview",
-        "category": "LoCoRe"
-      },
-      {
-        "command": "locore.createReview",
-        "title": "Create Review",
-        "category": "LoCoRe",
-        "enablement": "!commentIsEmpty"
-      },
-      {
-        "command": "locore.replyReview",
-        "title": "Reply",
-        "category": "LoCoRe",
-        "enablement": "!commentIsEmpty"
-      }
-    ],
-    "menus": {
-      "comments/commentThread/context": [
+    "contributes": {
+      "commands": [
+        {
+          "command": "locore.openCodeReview",
+          "title": "Open CodeReview",
+          "category": "LoCoRe"
+        },
         {
           "command": "locore.createReview",
-          "group": "inline",
-          "when": "commentController == locore-comments && commentThreadIsEmpty"
+          "title": "Create Review",
+          "category": "LoCoRe",
+          "enablement": "!commentIsEmpty"
         },
         {
           "command": "locore.replyReview",
-          "group": "inline",
-          "when": "commentController == locore-comments && !commentThreadIsEmpty"
+          "title": "Reply",
+          "category": "LoCoRe",
+          "enablement": "!commentIsEmpty"
+        },
+        {
+          "command": "locore.resolveThread",
+          "title": "Resolve Thread",
+          "category": "LoCoRe"
+        },
+        {
+          "command": "locore.reopenThread",
+          "title": "Reopen Thread",
+          "category": "LoCoRe"
         }
-      ]
-    }
-  },
+      ],
+      "menus": {
+        "comments/commentThread/context": [
+          {
+            "command": "locore.createReview",
+            "group": "inline",
+            "when": "commentController == locore-comments && commentThreadIsEmpty"
+          },
+          {
+            "command": "locore.replyReview",
+            "group": "inline",
+            "when": "commentController == locore-comments && !commentThreadIsEmpty"
+          },
+          {
+            "command": "locore.resolveThread",
+            "group": "navigation@99",
+            "when": "commentController == locore-comments && commentThread == locore:unresolved"
+          },
+          {
+            "command": "locore.reopenThread",
+            "group": "navigation@99",
+            "when": "commentController == locore-comments && commentThread == locore:resolved"
+          }
+        ]
+      }
+    },
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
