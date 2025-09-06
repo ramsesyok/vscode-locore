@@ -23,6 +23,11 @@
         "category": "LoCoRe"
       },
       {
+        "command": "locore.closeCodeReview",
+        "title": "Close Code Review",
+        "category": "LoCoRe"
+      },
+      {
         "command": "locore.createReview",
         "title": "Create Review",
         "category": "LoCoRe",

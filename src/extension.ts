@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { createCommentController, restoreExistingThreads, setThreadState } from './comment-controller';
+import { createCommentController, restoreExistingThreads, setThreadState, disposeCommentController } from './comment-controller';
 import { initializeReviewStores } from './review-store';
 import { upsertReview } from './review-service';
 
@@ -34,6 +34,12 @@ export function activate(context: vscode.ExtensionContext) {
         const dir = getCodeReviewDir();
         if (!thread || !dir) return;
         await setThreadState(thread, 'open', dir);
+    }));
+
+    // Close Code Review: コントローラを破棄してUIを閉じる
+    context.subscriptions.push(vscode.commands.registerCommand('locore.closeCodeReview', async () => {
+        disposeCommentController();
+        vscode.window.showInformationMessage('LoCoRe: Code Review を閉じました。');
     }));
 }
 
@@ -84,5 +90,11 @@ function getThreadFromArg(arg: any): vscode.CommentThread | undefined {
     return undefined;
 }
 
-/** 拡張機能の非アクティベーション関数 */
-export function deactivate() { }
+/**
+ * 拡張機能の非アクティベーション関数
+ * - VS Code が拡張を無効化する際に呼ばれます。
+ * - 生成済みの CommentController を確実に破棄します。
+ */
+export function deactivate() {
+    disposeCommentController();
+}

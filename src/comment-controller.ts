@@ -43,6 +43,19 @@ export function createCommentController(context: vscode.ExtensionContext): vscod
 }
 
 /**
+ * コメントコントローラを安全に破棄する。
+ * - UI上の全スレッドが消え、入力ボックス等も閉じられます。
+ * - 再度使う場合は createCommentController を呼び直してください。
+ */
+export function disposeCommentController(): void {
+    try {
+        controller?.dispose();
+    } finally {
+        controller = undefined;
+    }
+}
+
+/**
  * index.json に保存されたスレッドを UI に復元し、review.jsonl のコメントも表示する。
  */
 export async function restoreExistingThreads(codeReviewDir: string): Promise<void> {
@@ -160,4 +173,3 @@ export function resolveThreadIdFromIndex(indexData: IndexJsonSchemaV1, thread: v
     }
     return undefined;
 }
-
