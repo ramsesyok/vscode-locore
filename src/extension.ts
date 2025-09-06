@@ -30,10 +30,20 @@ export function activate(context: vscode.ExtensionContext) {
     }));
 
     // スレッドの解決/再オープン
-    context.subscriptions.push(vscode.commands.registerCommand('locore.resolveThread', async (thread: vscode.CommentThread) => {
+    context.subscriptions.push(vscode.commands.registerCommand('locore.resolveThread', async (arg?: any) => {
+        const thread = getThreadFromArg(arg);
+        if (!thread) {
+            vscode.window.showErrorMessage('スレッド情報を取得できませんでした。');
+            return;
+        }
         await setThreadState(thread, 'closed');
     }));
-    context.subscriptions.push(vscode.commands.registerCommand('locore.reopenThread', async (thread: vscode.CommentThread) => {
+    context.subscriptions.push(vscode.commands.registerCommand('locore.reopenThread', async (arg?: any) => {
+        const thread = getThreadFromArg(arg);
+        if (!thread) {
+            vscode.window.showErrorMessage('スレッド情報を取得できませんでした。');
+            return;
+        }
         await setThreadState(thread, 'open');
     }));
 
@@ -330,6 +340,22 @@ async function restoreExistingThreads(codeReviewDir: string): Promise<void> {
 }
 
 /**
+ * コメントメニューなどから渡ってくる引数から CommentThread を抽出する。
+ */
+function getThreadFromArg(arg: any): vscode.CommentThread | undefined {
+    if (!arg) return undefined;
+    // 直接 thread が来る場合
+    if (typeof arg === 'object' && 'uri' in arg && 'range' in arg) {
+        return arg as vscode.CommentThread;
+    }
+    // ラッパー { thread } で来る場合
+    if (typeof arg === 'object' && 'thread' in arg && arg.thread && 'uri' in arg.thread) {
+        return arg.thread as vscode.CommentThread;
+    }
+    return undefined;
+}
+
+/**
  * 指定スレッドの state を index.json に反映し、UI も同期する。
  */
 async function setThreadState(thread: vscode.CommentThread, state: 'open' | 'closed'): Promise<void> {
@@ -345,6 +371,10 @@ async function setThreadState(thread: vscode.CommentThread, state: 'open' | 'clo
         // 既存 index を取得
         const indexData = await readIndexJson(indexPath);
 
+        // 先に最低限のバリデーション（URI 必須）
+        if (!thread?.uri) {
+            throw new Error('無効なスレッド（URI が未定義）');
+        }
         // threadId を解決（見つからなければ新規で作る）
         let threadId = threadIdMap.get(thread) || resolveThreadIdFromIndex(indexData, thread);
         const nowIso = new Date().toISOString();
@@ -480,6 +510,8 @@ async function upsertReview(reply: vscode.CommentReply): Promise<void> {
             timestamp: new Date(nowIso)
         } as vscode.Comment;
         thread.comments = [...thread.comments, newComment];
+        // 入力ボックスのメニュー出し分け用に contextValue を設定
+        thread.contextValue = 'locore:unresolved';
 
         vscode.window.showInformationMessage(isNewThread ? 'レビューを作成しました。' : '返信を追加しました。');
     } catch (err: any) {

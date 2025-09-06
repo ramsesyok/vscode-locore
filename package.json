@@ -55,13 +55,13 @@
           },
           {
             "command": "locore.resolveThread",
-            "group": "navigation@99",
-            "when": "commentController == locore-comments && commentThread == locore:unresolved"
+            "group": "inline@99",
+            "when": "commentController == locore-comments && commentThread == locore:unresolved && !commentThreadIsEmpty"
           },
           {
             "command": "locore.reopenThread",
-            "group": "navigation@99",
-            "when": "commentController == locore-comments && commentThread == locore:resolved"
+            "group": "inline@99",
+            "when": "commentController == locore-comments && commentThread == locore:resolved && !commentThreadIsEmpty"
           }
         ]
       }
