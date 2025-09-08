@@ -7,6 +7,7 @@ import {
     writeIndexJson
 } from './review-store';
 import { generateUuid } from './utils';
+import { keyFromThread, parseStoredUri } from './path-utils';
 
 /**
  * コメントコントローラ（CommentController）は拡張機能のライフサイクル中で1つだけ保持。
@@ -64,6 +65,7 @@ export async function restoreExistingThreads(codeReviewDir: string): Promise<voi
 
     const indexPath = path.join(codeReviewDir, 'index.json');
     const reviewPath = path.join(codeReviewDir, 'review.jsonl');
+    const workspaceRoot = path.dirname(codeReviewDir);
 
     const indexData = await readIndexJson(indexPath);
     const jsonlRows = await readAllJsonl(reviewPath);
@@ -79,7 +81,7 @@ export async function restoreExistingThreads(codeReviewDir: string): Promise<voi
     for (const threadId of Object.keys(indexData.threads)) {
         const t = indexData.threads[threadId];
         try {
-            const uri = vscode.Uri.parse(t.uri);
+            const uri = parseStoredUri(t.uri, workspaceRoot);
             const range = new vscode.Range(
                 new vscode.Position(t.range.start.line, t.range.start.character),
                 new vscode.Position(t.range.end.line, t.range.end.character)
@@ -114,11 +116,12 @@ export async function setThreadState(thread: vscode.CommentThread, state: 'open'
 
     const indexPath = path.join(codeReviewDir, 'index.json');
     const indexData = await readIndexJson(indexPath);
+    const workspaceRoot = path.dirname(codeReviewDir);
 
     // threadId を既存マップか index.json から解決。無ければ新規採番し登録。
     let threadId = threadIdMap.get(thread) || resolveThreadIdFromIndex(indexData, thread);
     const nowIso = new Date().toISOString();
-    const uriStr = thread.uri.toString();
+    const uriKey = keyFromThread(thread, workspaceRoot);
     const r = thread.range ?? new vscode.Range(0, 0, 0, 0);
 
     if (!threadId) {
@@ -126,7 +129,7 @@ export async function setThreadState(thread: vscode.CommentThread, state: 'open'
         threadIdMap.set(thread, threadId);
         indexData.threads[threadId] = {
             threadId,
-            uri: uriStr,
+            uri: uriKey,
             range: {
                 start: { line: r.start.line, character: r.start.character },
                 end: { line: r.end.line, character: r.end.character }
@@ -137,14 +140,23 @@ export async function setThreadState(thread: vscode.CommentThread, state: 'open'
             commentCount: 0,
             anchors: {}
         };
-        if (!indexData.byUri[uriStr]) indexData.byUri[uriStr] = [];
-        if (!indexData.byUri[uriStr].includes(threadId)) indexData.byUri[uriStr].push(threadId);
+        if (!indexData.byUri[uriKey]) indexData.byUri[uriKey] = [];
+        if (!indexData.byUri[uriKey].includes(threadId)) indexData.byUri[uriKey].push(threadId);
     }
 
     // 状態を更新して保存
     const t = indexData.threads[threadId];
     t.state = state;
     t.updatedAt = nowIso;
+    // 既存データの移行: URI を相対キーに統一し、byUri も補正
+    t.uri = uriKey;
+    const absKey = thread.uri.toString();
+    if (indexData.byUri[absKey]) {
+        indexData.byUri[absKey] = indexData.byUri[absKey].filter((id) => id !== threadId);
+        if (indexData.byUri[absKey].length === 0) delete indexData.byUri[absKey];
+    }
+    if (!indexData.byUri[uriKey]) indexData.byUri[uriKey] = [];
+    if (!indexData.byUri[uriKey].includes(threadId)) indexData.byUri[uriKey].push(threadId);
     await writeIndexJson(indexPath, indexData);
 
     // UI 側に反映
@@ -157,9 +169,13 @@ export async function setThreadState(thread: vscode.CommentThread, state: 'open'
  * index.json から、与えられた UI スレッド（URI・Range）に一致する threadId を探す。
  */
 export function resolveThreadIdFromIndex(indexData: IndexJsonSchemaV1, thread: vscode.CommentThread): string | undefined {
-    const uriStr = thread.uri.toString();
     const r = thread.range ?? new vscode.Range(0, 0, 0, 0);
-    const ids = indexData.byUri[uriStr] || [];
+    const workspaceRoot = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0
+        ? vscode.workspace.workspaceFolders[0].uri.fsPath
+        : undefined;
+    const absKey = thread.uri.toString();
+    const relKey = workspaceRoot ? keyFromThread(thread, workspaceRoot) : undefined;
+    const ids = (relKey && indexData.byUri[relKey]) || indexData.byUri[absKey] || [];
     for (const id of ids) {
         const t = indexData.threads[id];
         if (!t) continue;
