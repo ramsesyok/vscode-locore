@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as os from 'os';
 import * as path from 'path';
 import { generateUuid } from './utils';
+import { keyFromThread } from './path-utils';
 import {
     appendJsonl,
     initializeReviewStores,
@@ -32,7 +33,7 @@ export async function upsertReview(reply: vscode.CommentReply): Promise<void> {
     await initializeReviewStores(codeReviewDir);
 
     const thread = reply.thread;
-    const uriStr = thread.uri.toString();
+    const uriKey = keyFromThread(thread, workspaceRoot);
     const range = thread.range ?? new vscode.Range(0, 0, 0, 0);
     const nowIso = new Date().toISOString();
 
@@ -46,7 +47,7 @@ export async function upsertReview(reply: vscode.CommentReply): Promise<void> {
         // 新規スレッドエントリを作成
         indexData.threads[threadId] = {
             threadId,
-            uri: uriStr,
+            uri: uriKey,
             range: {
                 start: { line: range.start.line, character: range.start.character },
                 end: { line: range.end.line, character: range.end.character }
@@ -57,8 +58,8 @@ export async function upsertReview(reply: vscode.CommentReply): Promise<void> {
             commentCount: 0,
             anchors: {}
         };
-        if (!indexData.byUri[uriStr]) indexData.byUri[uriStr] = [];
-        if (!indexData.byUri[uriStr].includes(threadId)) indexData.byUri[uriStr].push(threadId);
+        if (!indexData.byUri[uriKey]) indexData.byUri[uriKey] = [];
+        if (!indexData.byUri[uriKey].includes(threadId)) indexData.byUri[uriKey].push(threadId);
     }
 
     // 次の seq を採番（グローバル単調増加）
@@ -85,6 +86,15 @@ export async function upsertReview(reply: vscode.CommentReply): Promise<void> {
     t.updatedAt = nowIso;
     if (typeof t.firstSeq !== 'number') t.firstSeq = nextSeq;
     t.lastSeq = nextSeq;
+    // 既存データの移行: URI を相対キーに統一し、byUri も補正
+    t.uri = uriKey;
+    const absKey = thread.uri.toString();
+    if (indexData.byUri[absKey]) {
+        indexData.byUri[absKey] = indexData.byUri[absKey].filter((id) => id !== threadId);
+        if (indexData.byUri[absKey].length === 0) delete indexData.byUri[absKey];
+    }
+    if (!indexData.byUri[uriKey]) indexData.byUri[uriKey] = [];
+    if (!indexData.byUri[uriKey].includes(threadId)) indexData.byUri[uriKey].push(threadId);
     indexData.lastSeq = nextSeq;
     await writeIndexJson(indexPath, indexData);
 
@@ -102,4 +112,3 @@ export async function upsertReview(reply: vscode.CommentReply): Promise<void> {
 
     vscode.window.showInformationMessage(isNewThread ? 'レビューを作成しました。' : '返信を追加しました。');
 }
-
